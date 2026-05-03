@@ -1,114 +1,142 @@
 <!DOCTYPE html>
 <html>
 <head>
+    <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>K-INFLUENCE: SUPREMACY</title>
     <style>
-        body { margin: 0; background: #000; color: #fff; font-family: sans-serif; overflow: hidden; }
-        .page { display: none; width: 100vw; height: 100vh; flex-direction: column; align-items: center; justify-content: center; }
-        .active { display: flex; }
-        canvas { display: block; touch-action: none; background: #1a1a1a; }
-        #ui { position: fixed; bottom: 20px; left: 20px; display: flex; gap: 10px; }
-        .btn { background: #444; color: #fff; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; }
-        #stats { position: fixed; top: 10px; left: 10px; background: rgba(0,0,0,0.6); padding: 10px; pointer-events: none; }
+        :root { --main-bg: #050a10; --accent: #00d2ff; --p-card: rgba(15, 25, 40, 0.95); }
+        body { margin: 0; background: var(--main-bg); color: #fff; font-family: 'Pretendard', sans-serif; overflow: hidden; }
+        canvas { display: block; touch-action: none; }
+        #lobby { position: fixed; inset: 0; background: var(--main-bg); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 100; }
+        .ui-panel { position: absolute; background: var(--p-card); border: 1px solid #1e3a5a; padding: 15px; border-radius: 12px; pointer-events: all; }
+        #top-bar { top: 15px; left: 50%; transform: translateX(-50%); display: flex; gap: 30px; font-weight: 800; }
+        #action-menu { bottom: 20px; right: 20px; display: flex; flex-direction: column; gap: 8px; }
+        .btn { background: #1e3a5a; color: #fff; border: 1px solid var(--accent); padding: 12px 25px; border-radius: 8px; cursor: pointer; font-weight: bold; }
+        .btn:active { background: var(--accent); color: #000; }
+        #player-list { margin: 20px; text-align: left; width: 250px; }
     </style>
 </head>
 <body>
-    <div id="p-main" class="page active">
-        <h1>K-INFLUENCE FULL</h1>
-        <button class="btn" onclick="send({type:'CREATE'})">방 만들기</button>
-        <input type="text" id="rid-in" placeholder="방 코드">
-        <button class="btn" onclick="send({type:'JOIN', rid:document.getElementById('rid-in').value})">참가</button>
-    </div>
-
-    <div id="p-lobby" class="page">
-        <h2>대기실: <span id="room-id"></span></h2>
-        <button id="start-btn" class="btn" onclick="send({type:'START', rid:curRid})">게임 시작</button>
-    </div>
-
-    <div id="p-game" class="page">
-        <div id="stats">GOLD: <span id="g-val">0</span> | SCI: <span id="s-val">0</span></div>
-        <canvas id="cvs"></canvas>
-        <div id="ui">
-            <button class="btn" onclick="buyUnit('INF')">보병(50G)</button>
-            <button class="btn" onclick="buyUnit('TANK')">기갑(150G)</button>
+    <!-- 룸 로비 -->
+    <div id="lobby">
+        <h1 style="font-size: 3.5em; text-shadow: 0 0 20px var(--accent);">K-INFLUENCE</h1>
+        <div id="pre-join">
+            <button class="btn" onclick="send({type:'CREATE'})">새 방 만들기</button>
+            <div style="margin-top: 15px;">
+                <input type="text" id="rid-in" placeholder="방 코드" style="padding: 12px;">
+                <button class="btn" onclick="send({type:'JOIN', rid:document.getElementById('rid-in').value.toUpperCase()})">참전</button>
+            </div>
+        </div>
+        <div id="wait-join" style="display:none">
+            <h2 id="room-code-display">CODE: ----</h2>
+            <div id="player-list" class="ui-panel"></div>
+            <button id="start-btn" class="btn" style="display:none; background: #2ecc71;" onclick="send({type:'START', rid:curRid})">전군 출격</button>
         </div>
     </div>
 
-<script>
-    let ws = new WebSocket(location.origin.replace(/^http/, 'ws'));
-    let curRid = null, myId = null, gameData = null, selected = [];
-    const cvs = document.getElementById('cvs');
-    const ctx = cvs.getContext('2d');
+    <!-- 인게임 UI -->
+    <div id="game-ui" style="display:none">
+        <div id="top-bar" class="ui-panel">
+            <span>💰 <span id="gold">0</span></span>
+            <span>🧪 <span id="sci">0</span></span>
+        </div>
+        <div id="action-menu" class="ui-panel">
+            <button class="btn" onclick="buy('INF')">보병(50)</button>
+            <button class="btn" onclick="buy('TANK')">기갑(220)</button>
+            <button class="btn" onclick="buy('NAVY')">해군(550)</button>
+            <hr style="width:100%; border:0.5px solid #333;">
+            <button class="btn" style="background:#8e44ad" onclick="send({type:'CMD', cmd:'TECH', tId:'RIFLE'})">강선개량(150)</button>
+        </div>
+    </div>
 
-    function send(obj) { ws.send(JSON.stringify(obj)); }
+    <canvas id="game-cvs"></canvas>
+
+<script>
+    const cvs = document.getElementById('game-cvs'), ctx = cvs.getContext('2d');
+    let ws = new WebSocket(location.origin.replace(/^http/, 'ws'));
+    let myId, curRid, game = null, selected = [];
+
+    function send(o) { if(curRid) o.rid = curRid; ws.send(JSON.stringify(o)); }
+    function buy(uType) { send({ type: 'CMD', cmd: 'BUY', uType, x: 800, y: 1200 }); }
 
     ws.onmessage = (e) => {
         const d = JSON.parse(e.data);
         if(d.type === 'JOINED') {
-            curRid = d.rid; myId = d.isHost;
-            document.getElementById('room-id').innerText = d.rid;
-            if(!d.isHost) document.getElementById('start-btn').style.display = 'none';
-            document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-            document.getElementById('p-lobby').classList.add('active');
-        }
-        if(d.type === 'GAME_DATA') {
-            gameData = d;
-            if(document.getElementById('p-game').classList.contains('active') === false) {
-                document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-                document.getElementById('p-game').classList.add('active');
-                cvs.width = window.innerWidth; cvs.height = window.innerHeight;
+            myId = d.pid; curRid = d.rid;
+            document.getElementById('pre-join').style.display = 'none';
+            document.getElementById('wait-join').style.display = 'block';
+            document.getElementById('room-code-display').innerText = "CODE: " + d.rid;
+            if(d.isHost) document.getElementById('start-btn').style.display = 'block';
+        } else if(d.type === 'GAME_DATA') {
+            game = d;
+            document.getElementById('lobby').style.display = 'none';
+            document.getElementById('game-ui').style.display = 'block';
+            const me = d.players[myId];
+            if(me) {
+                document.getElementById('gold').innerText = Math.floor(me.gold);
+                document.getElementById('sci').innerText = Math.floor(me.sci);
             }
-            document.getElementById('g-val').innerText = Math.floor(d.players[Object.keys(d.players)[0]].gold);
-        }
+        } else if(d.type === 'KICKED') { alert('추방당했습니다.'); location.reload(); }
     };
 
-    function render() {
-        if(!gameData) return requestAnimationFrame(render);
+    function draw() {
+        if(!game) return requestAnimationFrame(draw);
         ctx.clearRect(0,0,cvs.width,cvs.height);
-        const scale = Math.min(cvs.width/800, cvs.height/1200);
+        const scale = Math.min(cvs.width/1600, cvs.height/2400);
         ctx.save(); ctx.scale(scale, scale);
 
-        // 영향력 맵
-        gameData.influence.forEach((row, i) => {
+        // 지형 배경
+        ctx.fillStyle = '#081221'; ctx.fillRect(0,0,1600,2400);
+        ctx.fillStyle = '#0a2118'; ctx.beginPath(); // 한반도 쉐입
+        ctx.moveTo(400, 150); ctx.lineTo(1200, 250); ctx.lineTo(1400, 1000); ctx.lineTo(900, 2250); ctx.lineTo(350, 2150); ctx.closePath(); ctx.fill();
+
+        // 영향력 격자
+        ctx.globalAlpha = 0.35;
+        game.influence.forEach((row, i) => {
             row.forEach((owner, j) => {
                 if(owner) {
-                    ctx.fillStyle = gameData.players[owner].color;
-                    ctx.globalAlpha = 0.3;
-                    ctx.fillRect(j*25, i*25, 25, 25);
+                    ctx.fillStyle = game.players[owner]?.color || '#fff';
+                    ctx.fillRect(j*40, i*40, 40, 40);
                 }
             });
         });
 
-        // 유닛
+        // 유닛 및 전투
         ctx.globalAlpha = 1.0;
-        gameData.units.forEach(u => {
-            ctx.fillStyle = gameData.players[u.owner].color;
-            ctx.beginPath(); ctx.arc(u.x, u.y, u.type==='TANK'?15:10, 0, Math.PI*2); ctx.fill();
-            if(u.penalty) { ctx.strokeStyle = 'red'; ctx.stroke(); }
+        game.units.forEach(u => {
+            const p = game.players[u.owner];
+            ctx.fillStyle = p?.color || '#fff';
+            ctx.beginPath(); ctx.arc(u.x, u.y, u.type==='TANK'?35:22, 0, Math.PI*2); ctx.fill();
+            if(u.penalty < 1) { ctx.strokeStyle = '#ff4757'; ctx.lineWidth = 6; ctx.stroke(); }
+            if(selected.includes(u.id)) { ctx.strokeStyle = '#fff'; ctx.lineWidth = 8; ctx.stroke(); }
+            
             // HP 바
-            ctx.fillStyle = 'red'; ctx.fillRect(u.x-10, u.y-20, 20, 4);
-            ctx.fillStyle = 'lime'; ctx.fillRect(u.x-10, u.y-20, 20*(u.hp/u.maxHp), 4);
+            ctx.fillStyle = '#000'; ctx.fillRect(u.x-30, u.y-55, 60, 8);
+            ctx.fillStyle = '#2ed573'; ctx.fillRect(u.x-30, u.y-55, 60*(u.curHp/u.hp), 8);
         });
 
         ctx.restore();
-        requestAnimationFrame(render);
+        requestAnimationFrame(draw);
     }
 
-    cvs.addEventListener('touchstart', (e) => {
-        const scale = Math.min(cvs.width/800, cvs.height/1200);
-        const tx = e.touches[0].clientX / scale; const ty = e.touches[0].clientY / scale;
-        selected = gameData.units.filter(u => Math.sqrt((u.x-tx)**2 + (u.y-ty)**2) < 40).map(u => u.id);
-    });
+    cvs.onmousedown = (e) => {
+        const scale = Math.min(cvs.width/1600, cvs.height/2400);
+        const tx = e.clientX / scale, ty = e.clientY / scale;
+        selected = game.units.filter(u => u.owner === myId && Math.sqrt((u.x-tx)**2 + (u.y-ty)**2) < 70).map(u => u.id);
+    };
 
-    cvs.addEventListener('touchend', (e) => {
+    cvs.onmouseup = (e) => {
         if(selected.length > 0) {
-            const scale = Math.min(cvs.width/800, cvs.height/1200);
-            const tx = e.changedTouches[0].clientX / scale; const ty = e.changedTouches[0].clientY / scale;
-            send({ type: 'MOVE', rid: curRid, x: tx, y: ty, uids: selected });
+            const scale = Math.min(cvs.width/1600, cvs.height/2400);
+            const tx = e.clientX / scale, ty = e.clientY / scale;
+            send({ type: 'CMD', cmd: 'MOVE', x: tx, y: ty, uids: selected });
         }
-    });
+    };
 
-    requestAnimationFrame(render);
+    window.onresize = () => { cvs.width = window.innerWidth; cvs.height = window.innerHeight; };
+    window.onresize();
+    requestAnimationFrame(draw);
 </script>
 </body>
 </html>
