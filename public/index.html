@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>K-RTS Online</title>
+    <style>
+        body { margin: 0; background: #111; overflow: hidden; font-family: sans-serif; }
+        canvas { display: block; touch-action: none; }
+        #ui { position: fixed; top: 10px; left: 10px; color: white; background: rgba(0,0,0,0.5); padding: 10px; border-radius: 5px; pointer-events: none; }
+    </style>
+</head>
+<body>
+    <div id="ui">💰 Gold: <span id="gold">0</span></div>
+    <canvas id="cvs"></canvas>
+
+<script>
+    const canvas = document.getElementById('cvs');
+    const ctx = canvas.getContext('2d');
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+
+    let ws = new WebSocket(location.origin.replace(/^http/, 'ws'));
+    let game = null;
+    let selected = [];
+    let myId = null;
+
+    ws.onmessage = (e) => {
+        game = JSON.parse(e.data);
+        if (!myId && Object.keys(game.players).length > 0) {
+            // 마지막으로 추가된 플레이어를 나로 가정 (간단한 구현)
+            myId = Object.keys(game.players).pop();
+        }
+        const me = game.players[myId];
+        if (me) document.getElementById('gold').innerText = Math.floor(me.gold);
+    };
+
+    function drawMap() {
+        // 바다
+        ctx.fillStyle = '#0f2a4a';
+        ctx.fillRect(0, 0, 800, 1200);
+        // 한반도 실루엣
+        ctx.fillStyle = '#2d5a27';
+        ctx.beginPath();
+        ctx.moveTo(200, 100); ctx.lineTo(600, 150); ctx.lineTo(650, 400);
+        ctx.lineTo(550, 800); ctx.lineTo(450, 1150); ctx.lineTo(300, 1100);
+        ctx.lineTo(250, 800); ctx.lineTo(180, 400); ctx.closePath();
+        ctx.fill();
+        // 산맥
+        ctx.fillStyle = '#3d362a';
+        ctx.fillRect(550, 200, 40, 400);
+    }
+
+    function render() {
+        if (!game) return requestAnimationFrame(render);
+        ctx.save();
+        // 반응형 대응: 화면 중앙에 맵 배치
+        const scale = Math.min(canvas.width / 800, canvas.height / 1200);
+        ctx.scale(scale, scale);
+
+        drawMap();
+
+        // 영토 표시
+        ctx.globalAlpha = 0.4;
+        game.influence.forEach((row, i) => {
+            row.forEach((owner, j) => {
+                if (owner) {
+                    ctx.fillStyle = game.players[owner]?.color;
+                    ctx.fillRect(j*25, i*25, 25, 25);
+                }
+            });
+        });
+
+        // 유닛 표시
+        ctx.globalAlpha = 1.0;
+        game.units.forEach(u => {
+            ctx.fillStyle = game.players[u.owner]?.color || '#fff';
+            ctx.beginPath();
+            ctx.arc(u.x, u.y, 12, 0, Math.PI*2);
+            ctx.fill();
+            if (selected.includes(u.id)) {
+                ctx.strokeStyle = 'white'; ctx.lineWidth = 3; ctx.stroke();
+            }
+        });
+        ctx.restore();
+        requestAnimationFrame(render);
+    }
+
+    canvas.addEventListener('touchstart', (e) => {
+        const rect = canvas.getBoundingClientRect();
+        const scale = Math.min(canvas.width / 800, canvas.height / 1200);
+        const tx = (e.touches[0].clientX - rect.left) / scale;
+        const ty = (e.touches[0].clientY - rect.top) / scale;
+        
+        selected = game.units
+            .filter(u => u.owner === myId && Math.sqrt((u.x-tx)**2 + (u.y-ty)**2) < 40)
+            .map(u => u.id);
+    });
+
+    canvas.addEventListener('touchend', (e) => {
+        if (selected.length > 0) {
+            const rect = canvas.getBoundingClientRect();
+            const scale = Math.min(canvas.width / 800, canvas.height / 1200);
+            const tx = (e.changedTouches[0].clientX - rect.left) / scale;
+            const ty = (e.changedTouches[0].clientY - rect.top) / scale;
+            ws.send(JSON.stringify({ type: 'MOVE', x: tx, y: ty, uids: selected }));
+        }
+    });
+
+    requestAnimationFrame(render);
+</script>
+</body>
+</html>
