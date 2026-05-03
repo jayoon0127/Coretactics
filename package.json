@@ -1,13 +1,8 @@
 {
-  "name": "korea-rts-game",
+  "name": "k-influence-overdrive",
   "version": "1.0.0",
-  "description": "Fast-paced Mobile RTS on Korea Map",
+  "description": "Full-spec Mobile RTS with Encirclement & Tech Tree",
   "main": "server.js",
-  "scripts": {
-    "start": "node server.js"
-  },
-  "dependencies": {
-    "express": "^4.18.2",
-    "ws": "^8.13.0"
-  }
+  "scripts": { "start": "node server.js" },
+  "dependencies": { "express": "^4.18.2", "ws": "^8.13.0" }
 }
